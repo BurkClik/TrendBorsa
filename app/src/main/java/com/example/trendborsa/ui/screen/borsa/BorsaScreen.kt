@@ -1,13 +1,21 @@
 package com.example.trendborsa.ui.screen.borsa
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,8 +53,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -58,6 +68,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -82,56 +93,77 @@ fun BorsaScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    Scaffold(
-        topBar = {
-            AuctionHeaderBar(
-                isEventActive = uiState.isEventActive,
-                remainingSeconds = uiState.remainingSeconds,
-                viewerCount = uiState.viewerCount
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            topBar = {
+                AuctionHeaderBar(
+                    isEventActive = uiState.isEventActive,
+                    remainingSeconds = uiState.remainingSeconds,
+                    viewerCount = uiState.viewerCount
+                )
+            },
+            bottomBar = {
+                uiState.product?.let { product ->
+                    SepeteEkleBar(
+                        product = product,
+                        isEventActive = uiState.isEventActive,
+                        onPurchase = viewModel::onPurchase
+                    )
+                }
+            },
+            containerColor = Color.White,
+            contentWindowInsets = WindowInsets(0)
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
+                when {
+                    uiState.isLoading -> {
+                        CircularProgressIndicator(
+                            modifier = Modifier.align(Alignment.Center),
+                            color = TrendyolOrange
+                        )
+                    }
+
+                    uiState.error != null -> {
+                        Text(
+                            text = uiState.error!!,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .padding(16.dp)
+                        )
+                    }
+
+                    uiState.product != null -> {
+                        ProductDetailContent(
+                            product = uiState.product!!,
+                            startPrice = uiState.startPrice,
+                            lowestPrice = uiState.lowestPrice,
+                            highestPrice = uiState.highestPrice,
+                            initialStock = uiState.initialStock,
+                            remainingStock = uiState.remainingStock,
+                            isEventActive = uiState.isEventActive
+                        )
+                    }
+                }
+            }
+        }
+
+        // P1: Live purchase feed banner
+        PurchaseFeedBanner(
+            feedItem = uiState.latestPurchase,
+            modifier = Modifier.align(Alignment.TopCenter)
+        )
+
+        // P0: Purchase success overlay
+        if (uiState.showPurchaseSuccess) {
+            PurchaseSuccessOverlay(
+                price = uiState.purchasePrice,
+                onDismiss = viewModel::dismissPurchaseSuccess
             )
-        },
-        bottomBar = {
-            uiState.product?.let { product ->
-                SepeteEkleBar(product = product)
-            }
-        },
-        containerColor = Color.White,
-        contentWindowInsets = WindowInsets(0)
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-            when {
-                uiState.isLoading -> {
-                    CircularProgressIndicator(
-                        modifier = Modifier.align(Alignment.Center),
-                        color = TrendyolOrange
-                    )
-                }
-
-                uiState.error != null -> {
-                    Text(
-                        text = uiState.error!!,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .padding(16.dp)
-                    )
-                }
-
-                uiState.product != null -> {
-                    ProductDetailContent(
-                        product = uiState.product!!,
-                        startPrice = uiState.startPrice,
-                        lowestPrice = uiState.lowestPrice,
-                        highestPrice = uiState.highestPrice,
-                        initialStock = uiState.initialStock,
-                        remainingStock = uiState.remainingStock
-                    )
-                }
-            }
         }
     }
 }
@@ -316,7 +348,8 @@ private fun ProductDetailContent(
     lowestPrice: Double,
     highestPrice: Double,
     initialStock: Int,
-    remainingStock: Int
+    remainingStock: Int,
+    isEventActive: Boolean
 ) {
     Column(
         modifier = Modifier
@@ -387,6 +420,8 @@ private fun ProductDetailContent(
             MiniPriceChart(
                 priceHistory = product.priceHistory,
                 isPriceUp = product.isPriceUp,
+                isEventActive = isEventActive,
+                currentPrice = product.currentPrice,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp)
@@ -694,17 +729,37 @@ private fun StockIndicator(
 private fun MiniPriceChart(
     priceHistory: List<Double>,
     isPriceUp: Boolean,
+    isEventActive: Boolean,
+    currentPrice: Double,
     modifier: Modifier = Modifier
 ) {
     val lineColor = if (isPriceUp) BorsaGreen else BorsaRed
 
     Column(modifier = modifier) {
-        Text(
-            text = "Fiyat Grafiği",
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = Color(0xFF333333)
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Fiyat Grafiği",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF333333)
+            )
+            // P3: Final price label when event ended
+            if (!isEventActive) {
+                Text(
+                    text = "Final: %.2f TL".format(currentPrice),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    modifier = Modifier
+                        .background(MediumGray, RoundedCornerShape(4.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+        }
         Spacer(modifier = Modifier.height(8.dp))
 
         Canvas(
@@ -787,7 +842,11 @@ private fun MerchantInfo(merchantName: String, score: Double) {
 }
 
 @Composable
-private fun SepeteEkleBar(product: Product) {
+private fun SepeteEkleBar(
+    product: Product,
+    isEventActive: Boolean,
+    onPurchase: () -> Unit
+) {
     val priceColor by animateColorAsState(
         targetValue = if (product.isPriceUp) BorsaGreen else BorsaRed,
         animationSpec = tween(300),
@@ -807,23 +866,200 @@ private fun SepeteEkleBar(product: Product) {
                 text = "%.2f TL".format(product.currentPrice),
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
-                color = priceColor
+                color = if (isEventActive) priceColor else MediumGray
             )
         }
         Button(
-            onClick = { },
+            onClick = onPurchase,
+            enabled = isEventActive,
             colors = ButtonDefaults.buttonColors(
-                containerColor = TrendyolOrange
+                containerColor = TrendyolOrange,
+                disabledContainerColor = MediumGray
             ),
             shape = RoundedCornerShape(8.dp),
             contentPadding = PaddingValues(horizontal = 32.dp, vertical = 12.dp)
         ) {
             Text(
-                text = "Sepete Ekle",
+                text = if (isEventActive) "Şimdi Al" else "Event Sona Erdi",
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White
             )
+        }
+    }
+}
+
+// ─── P0: Purchase Success Overlay ───────────────────────────────────
+
+@Composable
+private fun PurchaseSuccessOverlay(
+    price: Double,
+    onDismiss: () -> Unit
+) {
+    // Confetti particles
+    val confettiColors = listOf(
+        TrendyolOrange, BorsaGreen, BorsaRed, StarYellow,
+        Color(0xFF9C27B0), Color(0xFF2196F3)
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.6f))
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.Center
+    ) {
+        // Confetti canvas
+        val particles = remember {
+            List(40) {
+                ConfettiParticle(
+                    x = kotlin.random.Random.nextFloat(),
+                    speed = kotlin.random.Random.nextFloat() * 0.6f + 0.4f,
+                    delay = kotlin.random.Random.nextFloat() * 0.5f,
+                    rotation = kotlin.random.Random.nextFloat() * 360f,
+                    color = confettiColors[it % confettiColors.size],
+                    size = kotlin.random.Random.nextFloat() * 8f + 4f
+                )
+            }
+        }
+
+        val animProgress = remember { Animatable(0f) }
+        LaunchedEffect(Unit) {
+            animProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(durationMillis = 2000, easing = LinearEasing)
+            )
+        }
+
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            particles.forEach { p ->
+                val progress = ((animProgress.value - p.delay).coerceIn(0f, 1f))
+                val x = p.x * size.width
+                val y = progress * size.height * p.speed
+                val alpha = (1f - progress).coerceIn(0f, 1f)
+
+                drawCircle(
+                    color = p.color.copy(alpha = alpha),
+                    radius = p.size,
+                    center = Offset(x, y)
+                )
+            }
+        }
+
+        // Success card
+        Column(
+            modifier = Modifier
+                .padding(32.dp)
+                .background(Color.White, RoundedCornerShape(16.dp))
+                .padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "\uD83C\uDF89",
+                fontSize = 48.sp
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Tebrikler!",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color(0xFF333333)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "%.2f TL'den yakaladın!".format(price),
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = BorsaGreen
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Fiyatı kilitlendin, bu fırsat kaçmaz!",
+                fontSize = 14.sp,
+                color = MediumGray,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = TrendyolOrange),
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 32.dp, vertical = 12.dp)
+            ) {
+                Text(
+                    text = "Alışverişe Devam Et",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            }
+        }
+    }
+}
+
+private data class ConfettiParticle(
+    val x: Float,
+    val speed: Float,
+    val delay: Float,
+    val rotation: Float,
+    val color: Color,
+    val size: Float
+)
+
+// ─── P1: Purchase Feed Banner ───────────────────────────────────────
+
+@Composable
+private fun PurchaseFeedBanner(
+    feedItem: PurchaseFeedItem?,
+    modifier: Modifier = Modifier
+) {
+    AnimatedVisibility(
+        visible = feedItem != null,
+        enter = slideInVertically(
+            initialOffsetY = { -it },
+            animationSpec = tween(400)
+        ) + fadeIn(animationSpec = tween(400)),
+        exit = slideOutVertically(
+            targetOffsetY = { -it },
+            animationSpec = tween(400)
+        ) + fadeOut(animationSpec = tween(400)),
+        modifier = modifier.padding(top = 100.dp)
+    ) {
+        feedItem?.let { item ->
+            Row(
+                modifier = Modifier
+                    .padding(horizontal = 24.dp)
+                    .fillMaxWidth()
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                BorsaDarkGreen.copy(alpha = 0.95f),
+                                BorsaGreen.copy(alpha = 0.9f)
+                            )
+                        ),
+                        RoundedCornerShape(12.dp)
+                    )
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "\uD83D\uDED2",
+                    fontSize = 18.sp
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "${item.buyerName} %.2f TL'den aldı!".format(item.price),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = "şimdi",
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.7f)
+                )
+            }
         }
     }
 }

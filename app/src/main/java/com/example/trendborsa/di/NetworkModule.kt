@@ -1,6 +1,7 @@
 package com.example.trendborsa.di
 
 import com.example.trendborsa.data.remote.api.TrendBorsaApi
+import com.example.trendborsa.data.remote.ws.TrendBorsaWebSocket
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -16,6 +17,8 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
+
+    private const val BASE_HOST = "10.0.2.2:8080"
 
     @Provides
     @Singleton
@@ -40,7 +43,7 @@ object NetworkModule {
     @Singleton
     fun provideRetrofit(okHttpClient: OkHttpClient, json: Json): Retrofit {
         return Retrofit.Builder()
-            .baseUrl("https://api.trendborsa.example.com/")
+            .baseUrl("http://$BASE_HOST/api/")
             .client(okHttpClient)
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
@@ -50,5 +53,11 @@ object NetworkModule {
     @Singleton
     fun provideTrendBorsaApi(retrofit: Retrofit): TrendBorsaApi {
         return retrofit.create(TrendBorsaApi::class.java)
+    }
+
+    @Provides
+    @Singleton
+    fun provideTrendBorsaWebSocket(okHttpClient: OkHttpClient, json: Json): TrendBorsaWebSocket {
+        return TrendBorsaWebSocket(okHttpClient, json, "ws://$BASE_HOST")
     }
 }
